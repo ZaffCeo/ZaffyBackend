@@ -1,64 +1,62 @@
-from fastapi import FastAPI, Request
-from pydantic import BaseModel
 import os
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 import requests
-import datetime
 from dotenv import load_dotenv
 
-# Load environment variables from .env
 load_dotenv()
+
+HF_API_KEY = os.getenv("HF_API_KEY")
 
 app = FastAPI()
 
-# Health check route
+# Allow all origins for now (can restrict in prod)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.get("/")
 async def root():
     return {"message": "✅ Zaffy backend running successfully."}
 
-# Request model
-class ChatRequest(BaseModel):
-    user_id: str
-    message: str
-
-# Chat endpoint
 @app.post("/chat")
-async def chat_with_zaffy(chat: ChatRequest):
-    hf_api_key = os.getenv("HF_API_KEY")
-    hf_model = "Qwen/Qwen1.5-0.5B-Chat"
-    api_url = f"https://api-inference.huggingface.co/models/{hf_model}"
-
-    headers = {
-        "Authorization": f"Bearer {hf_api_key}",
-        "Content-Type": "application/json"
-    }
-
-    prompt = f"<|user|>\n{chat.message}\n<|assistant|>"
-
-    payload = {
-        "inputs": prompt,
-        "parameters": {
-            "max_new_tokens": 200,
-            "temperature": 0.7
-        }
-    }
-
+async def chat(request: Request):
     try:
-        response = requests.post(api_url, headers=headers, json=payload, timeout=20)
+        data = await request.json()
+        user_prompt = data.get("prompt")
+
+        if not user_prompt:
+            return {"error": "Prompt missing."}
+
+        # Define your model - Qwen1.5 1.8B (good + free + multi-lang)
+        model_url = "https://api-inference.huggingface.co/models/Qwen/Qwen1.5-1.8B-Chat"
+
+        headers = {
+            "Authorization": f"Bearer {HF_API_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "inputs": f"User: {user_prompt}\nAssistant:",
+            "parameters": {
+                "max_new_tokens": 200,
+                "temperature": 0.7,
+                "top_p": 0.9
+            }
+        }
+
+        response = requests.post(model_url, headers=headers, json=payload)
+        response.raise_for_status()
         result = response.json()
 
-        if isinstance(result, list) and "generated_text" in result[0]:
-            full_text = result[0]["generated_text"]
-            reply = full_text.split("<|assistant|>")[-1].strip()
-        else:
-            reply = "Zaffy couldn’t understand that. Try again?"
+        generated_text = result[0]["generated_text"].replace(f"User: {user_prompt}\nAssistant:", "").strip()
+
+        return {"response": generated_text}
 
     except Exception as e:
-        reply = "Zaffy encountered an error while responding."
-
-    return {
-        "user_id": chat.user_id,
-        "message": chat.message,
-        "reply": reply,
-        "timestamp": datetime.datetime.now().isoformat()
-    }
-    
+        return {"error": str(e)}
+        
