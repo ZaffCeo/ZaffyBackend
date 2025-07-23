@@ -1,62 +1,59 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from pydantic import BaseModel
-from fastapi.middleware.cors import CORSMiddleware
+import os
 import requests
 import datetime
-import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file (locally)
+# Load environment variables from .env
 load_dotenv()
 
-# Initialize FastAPI
 app = FastAPI()
 
-# CORS setup
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Update with frontend domain for security
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"]
-)
+# Health check route
+@app.get("/")
+async def root():
+    return {"message": "✅ Zaffy backend running successfully."}
 
-# Hugging Face credentials from env
-HUGGINGFACE_API_KEY = os.getenv("HF_API_KEY")
-MODEL_ID = "Qwen/Qwen1.5-0.5B-Chat"  # Change to larger free model if needed
-
-# Request format
+# Request model
 class ChatRequest(BaseModel):
     user_id: str
     message: str
 
+# Chat endpoint
 @app.post("/chat")
-async def chat(chat: ChatRequest):
-    prompt = f"User: {chat.message}\nAssistant:"
-    headers = {"Authorization": f"Bearer {HUGGINGFACE_API_KEY}"}
+async def chat_with_zaffy(chat: ChatRequest):
+    hf_api_key = os.getenv("HF_API_KEY")
+    hf_model = "Qwen/Qwen1.5-0.5B-Chat"
+    api_url = f"https://api-inference.huggingface.co/models/{hf_model}"
+
+    headers = {
+        "Authorization": f"Bearer {hf_api_key}",
+        "Content-Type": "application/json"
+    }
+
+    prompt = f"<|user|>\n{chat.message}\n<|assistant|>"
+
     payload = {
         "inputs": prompt,
         "parameters": {
-            "temperature": 0.7,
             "max_new_tokens": 200,
-            "return_full_text": False
+            "temperature": 0.7
         }
     }
 
     try:
-        res = requests.post(
-            f"https://api-inference.huggingface.co/models/{MODEL_ID}",
-            headers=headers,
-            json=payload
-        )
-        if res.status_code == 200:
-            output = res.json()
-            reply = output[0]["generated_text"].strip()
+        response = requests.post(api_url, headers=headers, json=payload, timeout=20)
+        result = response.json()
+
+        if isinstance(result, list) and "generated_text" in result[0]:
+            full_text = result[0]["generated_text"]
+            reply = full_text.split("<|assistant|>")[-1].strip()
         else:
-            reply = f"Zaffy is facing issues. HF response: {res.status_code}"
+            reply = "Zaffy couldn’t understand that. Try again?"
 
     except Exception as e:
-        reply = f"Server error: {str(e)}"
+        reply = "Zaffy encountered an error while responding."
 
     return {
         "user_id": chat.user_id,
