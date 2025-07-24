@@ -1,7 +1,7 @@
 import os
+import requests
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-import requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -10,10 +10,10 @@ HF_API_KEY = os.getenv("HF_API_KEY")
 
 app = FastAPI()
 
-# Allow all origins for now (can restrict in prod)
+# ✅ CORS Setup - Open for now
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Change to specific frontend domain in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -21,7 +21,7 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"message": "✅ Zaffy backend running successfully."}
+    return {"message": "✅ Zaffy backend running successfully!"}
 
 @app.post("/chat")
 async def chat(request: Request):
@@ -30,18 +30,26 @@ async def chat(request: Request):
         user_prompt = data.get("prompt")
 
         if not user_prompt:
-            return {"error": "Prompt missing."}
+            return {"error": "❌ Prompt is missing."}
 
-        # Define your model - Qwen1.5 1.8B (good + free + multi-lang)
+        # ✅ Inject Desi Zaffy Personality
+        prompt_intro = (
+            "You are Zaffy — a witty, sarcastic, desi AI created by ZaffmIND 🇮🇳. "
+            "You speak like an emotional, fun-loving, patriotic Indian friend. "
+            "Be helpful, but also funny, caring, dramatic and inspiring. "
+            "Encourage users to believe in Indian tech and hustle with heart. "
+            "Use Hinglish and emojis to sound human.\n\n"
+            f"User: {user_prompt}\nAssistant:"
+        )
+
         model_url = "https://api-inference.huggingface.co/models/Qwen/Qwen1.5-1.8B-Chat"
-
         headers = {
             "Authorization": f"Bearer {HF_API_KEY}",
             "Content-Type": "application/json"
         }
 
         payload = {
-            "inputs": f"User: {user_prompt}\nAssistant:",
+            "inputs": prompt_intro,
             "parameters": {
                 "max_new_tokens": 200,
                 "temperature": 0.7,
@@ -53,10 +61,11 @@ async def chat(request: Request):
         response.raise_for_status()
         result = response.json()
 
-        generated_text = result[0]["generated_text"].replace(f"User: {user_prompt}\nAssistant:", "").strip()
+        generated_text = result[0]["generated_text"]
+        final_output = generated_text.replace(prompt_intro, "").strip()
 
-        return {"response": generated_text}
+        return {"response": final_output}
 
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": f"💥 Backend error: {str(e)}"}
         
